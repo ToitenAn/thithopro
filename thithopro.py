@@ -65,39 +65,44 @@ def read_docx(file_bytes):
             text = para.text.strip()
             if not text: continue
             
-            # Kiểm tra định dạng (Màu đỏ, Vàng, Dấu *)
+            # Kiểm tra dấu hiệu đáp án đúng (Màu đỏ, Vàng, hoặc Dấu * ở biên)
             is_bold = any(run.bold for run in para.runs)
             is_correct_style = False
-            if "*" in text: is_correct_style = True
+            
+            # Chỉ coi là dấu đánh dấu nếu * nằm ở vị trí đầu tiên
+            has_marker_star = text.startswith("*") 
+            
             for run in para.runs:
                 if (run.font.color and run.font.color.rgb == RGBColor(255, 0, 0)) or \
                    (run.font.highlight_color == WD_COLOR_INDEX.YELLOW):
                     is_correct_style = True
                     break
             
-            # Nhận diện tiêu đề câu hỏi
+            if has_marker_star: is_correct_style = True
+            
             is_header = text.lower().startswith("câu") and any(char.isdigit() for char in text[:10])
 
             if is_header:
                 current_q = {"question": text, "options": [], "correct": None}
                 data.append(current_q)
             elif current_q is not None:
+                # Xử lý sạch văn bản nhưng giữ lại nội dung đáp án
+                clean_text = text[1:].strip() if text.startswith("*") else text.strip()
+                
                 if is_correct_style:
-                    clean_text = text.replace("*", "").strip()
-                    if clean_text not in current_q["options"]:
-                        current_q["options"].append(clean_text)
-                        current_q["correct"] = clean_text
-                elif is_bold:
-                    # GỘP DÒNG IN ĐẬM VÀO CÂU HỎI (Fix lỗi code Java)
+                    current_q["options"].append(clean_text)
+                    current_q["correct"] = clean_text
+                elif is_bold and not any(opt in text for opt in current_q["options"]):
+                    # Nếu là dòng in đậm mới (không trùng với đáp án) thì đưa vào câu hỏi
                     current_q["question"] += "\n" + text
                 else:
-                    clean_text = text.replace("*", "").strip()
-                    if clean_text and clean_text not in current_q["options"]:
+                    # Thêm vào danh sách options nếu chưa tồn tại
+                    if clean_text not in current_q["options"]:
                         current_q["options"].append(clean_text)
+                        
         return [q for q in data if len(q['options']) >= 2]
     except Exception as e:
         st.error(f"Lỗi đọc Word: {e}"); return None
-
 # --- HÀM AI GIẢI THÍCH & PHẢN BIỆN ---
 def get_ai_explanation(q, options, corr_text):
     try:
@@ -209,4 +214,5 @@ if st.session_state.data_thi:
         if st.session_state.current_idx < len(data) - 1: st.session_state.current_idx += 1; st.rerun()
 else:
     st.info("👈 Nạp file Word/PDF để bắt đầu.")
+
 
