@@ -7,7 +7,7 @@ import random
 import time
 import io
 
-# --- CẤU HÌNH BẢO MẬT KEY (ẨN TRONG CODE) ---
+# --- CẤU HÌNH BẢO MẬT KEY ---
 HIDDEN_API_KEY = "AIzaSyCUkNGMJAuz4oZHyAMccN6W8zN4B6U8hWk" 
 
 # --- CẤU HÌNH GIAO DIỆN ---
@@ -16,9 +16,10 @@ st.set_page_config(page_title="ThiTho Pro", layout="wide", initial_sidebar_state
 st.markdown("""
     <style>
     .main .block-container { max-width: 95% !important; padding-top: 2rem !important; }
-    .question-box { background: #ffffff; padding: 20px; border-radius: 10px; border: 1px solid #dee2e6; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    .question-text { font-size: 20px !important; font-weight: 700; color: #1f1f1f; }
-    .ai-explanation { background-color: #f0f7ff; border-left: 5px solid #007bff; padding: 15px; margin-top: 15px; border-radius: 8px; color: #1a1a1a; line-height: 1.6; }
+    .question-box { background: #ffffff; padding: 25px; border-radius: 12px; border: 1px solid #dee2e6; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+    .question-text { font-size: 22px !important; font-weight: 700; color: #1f1f1f; margin-bottom: 15px; }
+    .ai-explanation { background-color: #f8faff; border-left: 6px solid #007bff; padding: 20px; margin-top: 15px; border-radius: 8px; color: #1a1a1a; font-size: 17px; line-height: 1.7; }
+    .ai-label { color: #007bff; font-weight: bold; font-size: 18px; margin-bottom: 8px; display: block; }
     div[data-testid="stHorizontalBlock"] button:has(span:contains("✅")) { background-color: #28a745 !important; color: white !important; }
     div[data-testid="stHorizontalBlock"] button:has(span:contains("❌")) { background-color: #ff4b4b !important; color: white !important; }
     </style>
@@ -57,36 +58,34 @@ def read_docx(file_bytes):
         st.error(f"Lỗi đọc file: {e}")
         return None
 
-# --- HÀM AI GIẢI THÍCH TRỰC DIỆN ---
+# --- HÀM AI GIẢI THÍCH (TỐI ƯU TRÌNH BÀY) ---
 def get_ai_explanation(q, options, corr_text):
     try:
         genai.configure(api_key=HIDDEN_API_KEY)
-        # Lấy danh sách model rảnh
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         available_models.sort(key=lambda x: ("flash" not in x.lower()))
 
-        labels = ["A", "B", "C", "D", "E", "F"]
-        corr_label = ""
-        options_text = ""
-        for i, opt in enumerate(options):
-            lbl = labels[i] if i < len(labels) else str(i)
-            options_text += f"{lbl}. {opt}\n"
-            if opt == corr_text: corr_label = lbl
-
-        prompt = f"""Bạn là giảng viên Mạng máy tính. Giải thích câu hỏi sau.
+        labels = ["A", "B", "C", "D"]
+        corr_label = labels[options.index(corr_text)] if corr_text in options else "?"
+        
+        # Prompt ép AI trình bày có cấu trúc
+        prompt = f"""Bạn là giảng viên Mạng máy tính. Hãy giải thích ngắn gọn và dễ nhìn.
         CÂU HỎI: {q}
-        LỰA CHỌN:
-        {options_text}
-        YÊU CẦU TRẢ LỜI ĐÚNG CẤU TRÚC: "Bạn nên chọn đáp án {corr_label} vì [Giải thích lý do ngắn gọn, tập trung kiến thức chuyên môn]."
-        Không chào hỏi, không nhắc lại đề."""
+        
+        YÊU CẦU TRÌNH BÀY:
+        1. Bắt đầu bằng: "Bạn nên chọn đáp án **{corr_label}** vì:"
+        2. Sau đó xuống dòng và dùng các gạch đầu dòng để giải thích lý do chính.
+        3. In đậm các thuật ngữ quan trọng.
+        4. Trả lời thẳng vào vấn đề, không chào hỏi.
+        """
 
         for m_name in available_models:
             try:
                 model = genai.GenerativeModel(m_name)
                 return model.generate_content(prompt).text
             except: continue
-        return "❌ AI quá tải, thử lại sau."
-    except Exception as e: return f"❌ Lỗi AI: {str(e)}"
+        return "❌ AI đang bận."
+    except Exception as e: return f"❌ Lỗi: {str(e)}"
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -119,82 +118,74 @@ with st.sidebar:
 if st.session_state.data_thi:
     data = st.session_state.data_thi
     idx = st.session_state.current_idx
-    tong, da_lam = len(data), len(st.session_state.user_answers)
-    dung = sum(1 for i, ans in st.session_state.user_answers.items() if ans == data[i]['correct'])
-    labels = ["A", "B", "C", "D", "E", "F"]
+    item = data[idx]
+    labels = ["A", "B", "C", "D"]
     
     col_l, col_m, col_r = st.columns([1, 2.5, 1.2])
     
     with col_l: # THỐNG KÊ
         with st.container(border=True):
             st.write("### 📊 Thống kê")
-            st.write(f"📝 Đã làm: **{da_lam}/{tong}**")
+            da_lam = len(st.session_state.user_answers)
+            dung = sum(1 for i, ans in st.session_state.user_answers.items() if ans == data[i]['correct'])
+            st.write(f"📝 Câu: **{idx+1}/{len(data)}**")
             st.write(f"✅ Đúng: **{dung}** | ❌ Sai: **{da_lam - dung}**")
-            st.progress(da_lam / tong if tong > 0 else 0)
-            st.metric("🎯 Điểm", f"{(dung/tong)*10:.2f}" if tong > 0 else "0.00")
+            st.progress((idx + 1) / len(data))
 
-    with col_m: # NỘI DUNG CÂU HỎI
-        item = data[idx]
-        st.markdown(f'<div class="question-box"><div class="question-text">Câu {idx + 1}:</div><div>{item["question"]}</div></div>', unsafe_allow_html=True)
+    with col_m: # NỘI DUNG
+        st.markdown(f'<div class="question-box"><div class="question-text">Câu {idx + 1}: {item["question"]}</div></div>', unsafe_allow_html=True)
         
         answered = idx in st.session_state.user_answers
-        # Hiển thị đáp án kèm nhãn A, B, C...
         opts_display = [f"{labels[i]}. {opt}" for i, opt in enumerate(item['options'])]
         
-        idx_choice = None
-        if answered:
-            ans_text = st.session_state.user_answers[idx]
-            idx_choice = item['options'].index(ans_text)
-
         choice_lbl = st.radio("Đáp án:", opts_display, key=f"r_{idx}", 
-                             index=idx_choice, disabled=answered, label_visibility="collapsed")
+                             index=item['options'].index(st.session_state.user_answers[idx]) if answered else None, 
+                             disabled=answered, label_visibility="collapsed")
         
         if choice_lbl and not answered:
-            # Lưu lại text gốc để check đúng sai
             st.session_state.user_answers[idx] = item['options'][opts_display.index(choice_lbl)]
             st.session_state.next_trigger = True
             st.rerun()
             
         if answered:
             corr_idx = item['options'].index(item['correct'])
-            corr_lbl = labels[corr_idx]
             if st.session_state.user_answers[idx] == item['correct']:
-                st.success(f"ĐÚNG! Đáp án: {corr_lbl} ✅")
+                st.success(f"Chính xác! Đáp án đúng là {labels[corr_idx]} ✅")
             else:
-                st.error(f"SAI! ❌ Đáp án đúng là {corr_lbl}: **{item['correct']}**")
+                st.error(f"Sai rồi! Đáp án đúng là {labels[corr_idx]}: {item['correct']}")
             
-            if st.button("💡 Tại sao đáp án này đúng?"):
-                with st.spinner("AI đang giải thích..."):
+            if st.button("💡 Giải thích nhanh"):
+                with st.spinner("AI đang tóm tắt kiến thức..."):
                     st.session_state.ex_cache[idx] = get_ai_explanation(item['question'], item['options'], item['correct'])
             
             if idx in st.session_state.ex_cache:
-                st.markdown(f'<div class="ai-explanation">{st.session_state.ex_cache[idx]}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="ai-explanation"><span class="ai-label">🤖 AI phân tích:</span><br>{st.session_state.ex_cache[idx]}</div>', unsafe_allow_html=True)
         
         st.write("---")
         c1, c2 = st.columns(2)
         if c1.button("⬅ Câu trước", use_container_width=True):
             st.session_state.current_idx = max(0, idx - 1); st.rerun()
         if c2.button("Câu sau ➡", use_container_width=True):
-            st.session_state.current_idx = min(tong-1, idx + 1); st.rerun()
+            st.session_state.current_idx = min(len(data)-1, idx + 1); st.rerun()
 
     with col_r: # MỤC LỤC
         st.write("### 📑 Mục lục")
         grid = 4
-        for i in range(0, tong, grid):
+        for i in range(0, len(data), grid):
             cols = st.columns(grid)
             for j in range(grid):
                 curr = i + j
-                if curr < tong:
+                if curr < len(data):
                     lbl = f"{curr+1}"
                     if curr in st.session_state.user_answers:
-                        lbl += " ✅" if st.session_state.user_answers[curr] == data[curr]['correct'] else " ❌"
+                        lbl += "✅" if st.session_state.user_answers[curr] == data[curr]['correct'] else "❌"
                     if cols[j].button(lbl, key=f"m_{curr}", use_container_width=True):
                         st.session_state.current_idx = curr; st.rerun()
 
     if st.session_state.next_trigger:
         time.sleep(1.0)
         st.session_state.next_trigger = False
-        if st.session_state.current_idx < tong - 1:
+        if st.session_state.current_idx < len(data) - 1:
             st.session_state.current_idx += 1; st.rerun()
 else:
-    st.info("👈 Mở thanh bên trái để nạp file Word (.docx) và bắt đầu.")
+    st.info("👈 Nạp file Word để bắt đầu.")
