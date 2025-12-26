@@ -12,14 +12,14 @@ HIDDEN_API_KEY = "AIzaSyCUkNGMJAuz4oZHyAMccN6W8zN4B6U8hWk"
 
 st.set_page_config(page_title="ThiTho Pro - Lập Trình Mạng", layout="wide")
 
-# --- CSS TỐI ƯU GIAO DIỆN ---
+# --- CSS GIAO DIỆN ---
 st.markdown("""
     <style>
     .main .block-container { max-width: 95% !important; padding-top: 2rem !important; }
     .question-box { background: #ffffff; padding: 25px; border-radius: 12px; border: 1px solid #dee2e6; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
     .question-text { font-size: 20px !important; font-weight: 700; color: #1f1f1f; margin-bottom: 10px; }
     .ai-explanation { background-color: #f0f7ff; border-left: 5px solid #007bff; padding: 20px; margin-top: 15px; border-radius: 8px; color: #1a1a1a; font-size: 16px; line-height: 1.6; }
-    .ai-header { color: #007bff; font-weight: bold; font-size: 18px; margin-bottom: 10px; display: block; }
+    .ai-important { color: #007bff; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -56,40 +56,42 @@ def read_docx(file_bytes):
         st.error(f"Lỗi đọc file: {e}")
         return None
 
-# --- HÀM AI TẬP TRUNG VÀO ĐÁP ÁN ---
+# --- HÀM AI TRẢ LỜI TRỰC DIỆN ---
 def get_ai_explanation(q, corr, user_ans):
     try:
         genai.configure(api_key=HIDDEN_API_KEY)
-        # Tự động lấy các model khả dụng trong tài khoản của bạn
+        # Tự động lấy danh sách model sống
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        available_models.sort(key=lambda x: ("flash" not in x.lower())) # Ưu tiên các dòng Flash
+        available_models.sort(key=lambda x: ("flash" not in x.lower()))
 
-        # PROMPT TẬP TRUNG CAO ĐỘ
+        # CẤU TRÚC PROMPT THEO YÊU CẦU
         prompt = f"""
-        Bạn là chuyên gia về Mạng máy tính. Hãy giải thích câu hỏi trắc nghiệm sau một cách cực kỳ ngắn gọn, đi thẳng vào vấn đề.
+        Bạn là giảng viên chuyên ngành Mạng máy tính. 
+        Hãy trả lời câu hỏi trắc nghiệm sau theo đúng cấu trúc yêu cầu.
 
         CÂU HỎI: {q}
         ĐÁP ÁN ĐÚNG: {corr}
-        NGƯỜI HỌC CHỌN: {user_ans}
 
-        Yêu cầu trả lời theo cấu trúc chính xác như sau:
-        1. Khẳng định đáp án đúng.
-        2. Tại sao đáp án đúng: Giải thích ngắn gọn tiêu chí hoặc kiến thức chuyên môn (ví dụ: Dưới góc độ địa lý thì mạng chia thành LAN, WAN, GAN...).
-        3. Tại sao các đáp án khác sai (nếu cần thiết để làm rõ).
-        
-        Trả lời bằng tiếng Việt, súc tích, không chào hỏi vòng vo.
+        YÊU CẦU CẤU TRÚC TRẢ LỜI:
+        "Bạn nên chọn đáp án **{corr}** vì [Giải thích lý do ngắn gọn, tập trung vào kiến thức chuyên môn, định nghĩa hoặc tiêu chí phân loại liên quan đến câu hỏi]."
+
+        Lưu ý: 
+        - Không chào hỏi.
+        - Không nhắc lại câu hỏi.
+        - Trả lời thẳng vào cấu trúc trên.
+        - Giải thích súc tích, dễ hiểu.
         """
 
         for m_name in available_models:
             try:
                 model = genai.GenerativeModel(m_name)
                 response = model.generate_content(prompt)
-                return f"<span class='ai-header'>🤖 AI Giải thích ({m_name.split('/')[-1]}):</span><br>{response.text}"
+                return response.text
             except:
                 continue
-        return "❌ Các model AI hiện đang quá tải. Thử lại sau giây lát."
+        return "❌ AI hiện đang bận, vui lòng thử lại sau."
     except Exception as e:
-        return f"❌ Lỗi hệ thống AI: {str(e)}"
+        return f"❌ Lỗi: {str(e)}"
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -113,9 +115,9 @@ if st.session_state.data_thi:
     idx = st.session_state.current_idx
     item = data[idx]
     
-    c_stats, c_main, c_nav = st.columns([1, 2.5, 1.2])
+    col_stats, col_main, col_nav = st.columns([1, 2.5, 1.2])
     
-    with c_stats:
+    with col_stats:
         with st.container(border=True):
             st.write(f"📝 Câu: **{idx+1}/{len(data)}**")
             dung = sum(1 for i, a in st.session_state.user_answers.items() if a == data[i]['correct'])
@@ -123,7 +125,7 @@ if st.session_state.data_thi:
             st.metric("❌ Sai", len(st.session_state.user_answers) - dung)
             st.progress((idx + 1) / len(data))
 
-    with c_main:
+    with col_main:
         st.markdown(f'<div class="question-box"><div class="question-text">Câu {idx + 1}:</div>{item["question"]}</div>', unsafe_allow_html=True)
         ans_done = idx in st.session_state.user_answers
         
@@ -141,8 +143,8 @@ if st.session_state.data_thi:
             else:
                 st.error(f"Sai rồi! Đáp án đúng: **{item['correct']}**")
                 
-            if st.button("💡 Giải thích bằng AI"):
-                with st.spinner("AI đang phân tích kiến thức chuyên môn..."):
+            if st.button("💡 Tại sao đáp án này đúng?"):
+                with st.spinner("AI đang phân tích..."):
                     st.session_state.ex_cache[idx] = get_ai_explanation(item['question'], item['correct'], st.session_state.user_answers[idx])
             
             if idx in st.session_state.ex_cache:
@@ -150,12 +152,12 @@ if st.session_state.data_thi:
 
         st.write("---")
         b1, b2 = st.columns(2)
-        if b1.button("⬅ Trước", use_container_width=True): 
+        if b1.button("⬅ Câu trước", use_container_width=True): 
             st.session_state.current_idx = max(0, idx - 1); st.rerun()
-        if b2.button("Sau ➡", use_container_width=True): 
+        if b2.button("Câu sau ➡", use_container_width=True): 
             st.session_state.current_idx = min(len(data) - 1, idx + 1); st.rerun()
 
-    with c_nav:
+    with col_nav:
         st.write("### 📑 Mục lục")
         for i in range(0, len(data), 4):
             cols = st.columns(4)
@@ -168,4 +170,4 @@ if st.session_state.data_thi:
                     if cols[j].button(lbl, key=f"n_{curr}", use_container_width=True):
                         st.session_state.current_idx = curr; st.rerun()
 else:
-    st.info("👈 Hãy tải file Word (.docx) để bắt đầu.")
+    st.info("👈 Hãy tải file Word (.docx) để bắt đầu ôn tập.")
