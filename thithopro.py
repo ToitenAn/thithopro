@@ -6,6 +6,10 @@ import google.generativeai as genai
 import random
 import time
 
+# --- CẤU HÌNH BẢO MẬT KEY (ẨN TRONG CODE) ---
+HIDDEN_API_KEY = "AIzaSyCUkNGMJAuz4oZHyAMccN6W8zN4B6U8hWk" 
+SELECTED_MODEL = "models/gemini-2.0-flash"
+
 # --- CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(page_title="ThiTho Pro", layout="wide", initial_sidebar_state="expanded")
 
@@ -34,20 +38,20 @@ for key in ['data_thi', 'user_answers', 'current_idx', 'next_trigger', 'ex_cache
         st.session_state[key] = None if key == 'data_thi' else ({} if key in ['user_answers', 'ex_cache'] else (0 if key == 'current_idx' else False))
 
 # --- HÀM AI GIẢI THÍCH ---
-def get_ai_explanation(api_key, question, correct_answer, user_answer):
+def get_ai_explanation(question, correct_answer, user_answer):
     try:
-        genai.configure(api_key=api_key.strip())
-        model = genai.GenerativeModel("models/gemini-2.0-flash")
+        genai.configure(api_key=HIDDEN_API_KEY)
+        model = genai.GenerativeModel(SELECTED_MODEL)
         prompt = f"""
-        Bạn là giảng viên chuyên ngành. Hãy giải thích ngắn gọn, súc tích tại sao đáp án đúng lại là '{correct_answer}'.
+        Bạn là giảng viên môn Lập trình mạng. Hãy giải thích ngắn gọn tại sao đáp án '{correct_answer}' lại đúng.
         Câu hỏi: {question}
         Người học chọn sai là: {user_answer}
-        Trả lời bằng tiếng Việt, định dạng Markdown.
+        Trả lời bằng tiếng Việt.
         """
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"❌ Lỗi AI: {str(e)}"
+        return f"❌ Lỗi kết nối AI: {str(e)}"
 
 # --- HÀM ĐỌC FILE WORD ---
 def read_docx(file):
@@ -79,10 +83,7 @@ def read_docx(file):
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.header("🔑 CẤU HÌNH AI")
-    user_key = st.text_input("Nhập Gemini API Key:", value="AIzaSyCUkNGMJAuz4oZHyAMccN6W8zN4B6U8hWk", type="password")
-    
-    st.header("⚙️ CÀI ĐẶT")
+    st.header("⚙️ CÀI ĐẶT ĐỀ")
     uploaded_file = st.file_uploader("Tải đề (Word)", type=["docx"])
     t1 = st.checkbox("Đảo câu hỏi")
     t2 = st.checkbox("Đảo đáp án")
@@ -99,12 +100,12 @@ with st.sidebar:
 
     if st.session_state.data_thi:
         st.markdown("---")
-        if st.button("🎯 Làm lại câu chưa đúng", use_container_width=True):
+        if st.button("🎯 Làm lại câu sai", use_container_width=True):
             sai_hoac_chua = [i for i in range(len(st.session_state.data_thi)) if st.session_state.user_answers.get(i) != st.session_state.data_thi[i]['correct']]
             if sai_hoac_chua:
                 st.session_state.data_thi = [st.session_state.data_thi[i] for i in sai_hoac_chua]
                 st.session_state.user_answers = {}; st.session_state.current_idx = 0; st.session_state.ex_cache = {}; st.rerun()
-        if st.button("🔄 Đổi đề khác", use_container_width=True):
+        if st.button("🔄 Đổi đề mới", use_container_width=True):
             st.session_state.data_thi = None; st.rerun()
 
 # --- GIAO DIỆN CHÍNH ---
@@ -120,8 +121,9 @@ if st.session_state.data_thi:
     with col_l:
         with st.container(border=True):
             st.write("### 📊 Thống kê")
-            st.write(f"📝 Đã làm: **{da_lam}/{tong}**")
-            st.write(f"✅ Đúng: **{dung}** | ❌ Sai: **{da_lam - dung}**")
+            st.write(f"📝 Tổng: **{da_lam}/{tong}**")
+            st.write(f"✅ Đúng: **{dung}**")
+            st.write(f"❌ Sai: **{da_lam - dung}**")
             st.progress(da_lam / tong if tong > 0 else 0)
             st.metric("🎯 Điểm", f"{(dung/tong)*10:.2f}" if tong > 0 else "0.00")
 
@@ -144,11 +146,11 @@ if st.session_state.data_thi:
                 st.success("ĐÚNG! ✅")
             else: 
                 st.error(f"SAI! ❌ Đáp án đúng: **{item['correct']}**")
-                # Nút giải thích bằng AI
-                if user_key:
-                    if st.button("💡 Giải thích bằng AI"):
-                        with st.spinner("AI đang phân tích..."):
-                            st.session_state.ex_cache[idx] = get_ai_explanation(user_key, item['question'], item['correct'], st.session_state.user_answers[idx])
+                
+                # Nút hỏi AI - Key đã được ẩn trong code nên không cần nhập
+                if st.button("💡 Tại sao sai? (Hỏi AI)"):
+                    with st.spinner("AI đang giải thích..."):
+                        st.session_state.ex_cache[idx] = get_ai_explanation(item['question'], item['correct'], st.session_state.user_answers[idx])
                 
                 if idx in st.session_state.ex_cache:
                     st.markdown(f'<div class="ai-explanation">{st.session_state.ex_cache[idx]}</div>', unsafe_allow_html=True)
@@ -180,4 +182,4 @@ if st.session_state.data_thi:
         if st.session_state.current_idx < tong - 1:
             st.session_state.current_idx += 1; st.rerun()
 else:
-    st.info("👈 Mở thanh bên trái để nạp file Word (.docx) và bắt đầu.")
+    st.info("👈 Vui lòng tải file Word (.docx) để bắt đầu.")
