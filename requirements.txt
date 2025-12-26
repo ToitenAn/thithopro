@@ -1,3 +1,6 @@
 streamlit
 python-docx
+
 pdfplumber
+docx2python
+google-generativeai
