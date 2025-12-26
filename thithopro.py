@@ -109,7 +109,7 @@ def get_ai_explanation(q, options, corr_text):
         corr_label = labels[options.index(corr_text)] if corr_text in options else "?"
         wrong_opts = [f"{labels[i]}. {opt}" for i, opt in enumerate(options) if opt != corr_text]
 
-        prompt = f"""Bạn là giảng viên chuyên ngành Mạng máy tính.
+        prompt = f"""Bạn là giảng viên.
         Câu hỏi: {q}
         Đáp án tài liệu chọn: {corr_label}. {corr_text}
         Các lựa chọn khác: {', '.join(wrong_opts)}
@@ -209,3 +209,4 @@ if st.session_state.data_thi:
         if st.session_state.current_idx < len(data) - 1: st.session_state.current_idx += 1; st.rerun()
 else:
     st.info("👈 Nạp file Word/PDF để bắt đầu.")
+
