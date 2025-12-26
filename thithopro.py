@@ -1,49 +1,52 @@
 import streamlit as st
 import google.generativeai as genai
 
-st.set_page_config(page_title="Kiểm tra API Key", page_icon="🔑")
+st.set_page_config(page_title="Check Key Dứt Điểm", page_icon="🧪")
 
-st.title("🔑 Tool Check API Key Gemini")
+st.title("🧪 Tool Test Key & Model")
 
 # Nhập Key
-api_key = st.text_input("Dán API Key của bạn vào đây:", type="password")
+key_input = st.text_input("Dán API Key vào đây:", type="password")
 
-if api_key:
+if key_input:
     try:
-        genai.configure(api_key=api_key)
+        # Cấu hình API
+        genai.configure(api_key=key_input.strip())
         
-        # Nút bấm để test
-        if st.button("🚀 Kiểm tra ngay"):
-            with st.spinner("Đang kết nối với Google AI..."):
-                # 1. Thử liệt kê các model mà Key này được phép dùng
-                available_models = []
-                for m in genai.list_models():
-                    if 'generateContent' in m.supported_generation_methods:
-                        available_models.append(m.name)
+        if st.button("🚀 Kiểm tra Model khả dụng"):
+            with st.spinner("Đang truy vấn Google AI..."):
+                # Lấy danh sách model chuẩn từ hệ thống
+                models = genai.list_models()
+                valid_models = [m.name for m in models if 'generateContent' in m.supported_generation_methods]
                 
-                if available_models:
-                    st.success("✅ Kết nối thành công!")
-                    st.write("### Các model bạn có quyền sử dụng:")
-                    for m in available_models:
-                        st.code(m)
+                if valid_models:
+                    st.success(f"✅ Key hoạt động! Tìm thấy {len(valid_models)} model.")
                     
-                    # 2. Thử gọi một câu chào đơn giản bằng model đầu tiên tìm thấy
-                    test_model = available_models[0]
+                    # Hiển thị danh sách model chuẩn để bạn copy
+                    st.write("### Danh sách Model (Tên chuẩn):")
+                    for name in valid_models:
+                        st.code(name)
+                    
+                    # Thử chat với model đầu tiên trong danh sách
+                    target = valid_models[0]
                     st.write(f"---")
-                    st.write(f"💬 Đang thử gọi model: `{test_model}`...")
+                    st.write(f"🤖 Đang thử Chat với: `{target}`")
                     
-                    model = genai.GenerativeModel(test_model)
-                    response = model.generate_content("Chào bạn, hãy nói 'OK' nếu bạn nghe thấy tôi.")
+                    model = genai.GenerativeModel(target)
+                    response = model.generate_content("Chào bạn, tôi là người dùng mới.")
                     
-                    st.info(f"AI phản hồi: {response.text}")
+                    st.success("💬 AI đã phản hồi thành công:")
+                    st.info(response.text)
                 else:
-                    st.warning("⚠️ Key hợp lệ nhưng không tìm thấy model nào khả dụng.")
+                    st.error("❌ Key đúng nhưng tài khoản này chưa được cấp quyền dùng bất kỳ model nào.")
                     
     except Exception as e:
-        st.error("❌ Lỗi rồi!")
-        st.code(str(e))
-        st.write("---")
-        st.write("👉 **Cách khắc phục lỗi 404:** Nếu danh sách model hiện ra không có `models/gemini-1.5-flash`, bạn phải dùng `models/gemini-pro` trong code chính.")
-
-else:
-    st.info("Vui lòng dán mã API Key để bắt đầu kiểm tra.")
+        st.error("❌ Lỗi kết nối!")
+        # Hiện lỗi chi tiết để bắt bệnh
+        error_msg = str(e)
+        st.code(error_msg)
+        
+        if "API_KEY_INVALID" in error_msg:
+            st.warning("👉 Key bạn nhập bị sai hoặc đã bị xóa.")
+        elif "404" in error_msg:
+            st.warning("👉 Lỗi 404: Do tên Model trong code không khớp với tên Google quy định.")
