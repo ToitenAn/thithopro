@@ -1,132 +1,183 @@
 import streamlit as st
-from docx2python import docx2python
+from docx import Document
+from docx.shared import RGBColor
+from docx.enum.text import WD_COLOR_INDEX
 import google.generativeai as genai
 import random
-import re
+import time
 
-# --- CẤU HÌNH ---
-st.set_page_config(page_title="ThiTho Pro - Lập Trình Mạng", layout="wide")
-
-# Model chuẩn bạn vừa tìm thấy
-# Mình chọn bản 2.0 Flash vì nó cực nhanh và ổn định
-SELECTED_MODEL = "models/gemini-2.0-flash"
+# --- CẤU HÌNH GIAO DIỆN ---
+st.set_page_config(page_title="ThiTho Pro", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
     .main .block-container { max-width: 95% !important; padding-top: 2rem !important; }
-    .question-box { background: #ffffff; padding: 25px; border-radius: 12px; border: 1px solid #dee2e6; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+    .question-box { 
+        background: #ffffff; padding: 20px; border-radius: 10px; 
+        border: 1px solid #dee2e6; margin-bottom: 20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
     .question-text { font-size: 20px !important; font-weight: 700; color: #1f1f1f; }
-    .ai-explanation { background-color: #f0f7ff; border-left: 5px solid #007bff; padding: 15px; margin-top: 15px; border-radius: 8px; color: #1a1a1a; line-height: 1.6; }
+    .ai-explanation {
+        background-color: #f0f7ff; border-left: 5px solid #007bff;
+        padding: 15px; margin-top: 15px; border-radius: 8px;
+        color: #1a1a1a; line-height: 1.6;
+    }
+    div[data-testid="stHorizontalBlock"] button:has(span:contains("✅")) { background-color: #28a745 !important; color: white !important; }
+    div[data-testid="stHorizontalBlock"] button:has(span:contains("❌")) { background-color: #ff4b4b !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
-if 'data_thi' not in st.session_state:
-    st.session_state.update({'data_thi': None, 'user_answers': {}, 'current_idx': 0, 'ex_cache': {}})
+# --- QUẢN LÝ TRẠNG THÁI ---
+for key in ['data_thi', 'user_answers', 'current_idx', 'next_trigger', 'ex_cache']:
+    if key not in st.session_state:
+        st.session_state[key] = None if key == 'data_thi' else ({} if key in ['user_answers', 'ex_cache'] else (0 if key == 'current_idx' else False))
 
-# --- HÀM GIẢI THÍCH AI ---
+# --- HÀM AI GIẢI THÍCH ---
 def get_ai_explanation(api_key, question, correct_answer, user_answer):
     try:
         genai.configure(api_key=api_key.strip())
-        model = genai.GenerativeModel(SELECTED_MODEL)
+        model = genai.GenerativeModel("models/gemini-2.0-flash")
         prompt = f"""
-        Bạn là giảng viên môn Lập trình mạng. 
+        Bạn là giảng viên chuyên ngành. Hãy giải thích ngắn gọn, súc tích tại sao đáp án đúng lại là '{correct_answer}'.
         Câu hỏi: {question}
-        Đáp án đúng là: {correct_answer}
         Người học chọn sai là: {user_answer}
-        Hãy giải thích ngắn gọn, súc tích tại sao đáp án đúng lại là {correct_answer}. Trả lời bằng tiếng Việt.
+        Trả lời bằng tiếng Việt, định dạng Markdown.
         """
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"❌ Lỗi: {str(e)}"
+        return f"❌ Lỗi AI: {str(e)}"
 
 # --- HÀM ĐỌC FILE WORD ---
-def process_network_docx(uploaded_file):
-    with open("temp.docx", "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    try:
-        with docx2python("temp.docx") as doc:
-            full_text = doc.text
-            sections = re.split(r'\nCâu\s+\d+', full_text)
-            final_data = []
-            for sec in sections:
-                lines = [l.strip() for l in sec.split('\n') if l.strip()]
-                if not lines: continue
-                question, options, correct = "", [], ""
-                for line in lines:
-                    if 'HA(' in line and '="' in line:
-                        m = re.search(r'=\s*"(.*)"', line)
-                        if m: question = m.group(1)
-                    if line.startswith('*'):
-                        clean = line.replace('*', '').strip().strip('"')
-                        options.append(clean); correct = clean
-                    elif not any(x in line for x in ["đáp án", "HA(", "TA(", "Phần"]):
-                        clean = line.strip().strip('"')
-                        if clean and clean not in options: options.append(clean)
-                if question and correct:
-                    final_data.append({"question": question, "options": options, "correct": correct})
-            return final_data
-    except Exception as e:
-        return None
+def read_docx(file):
+    doc = Document(file)
+    data = []
+    current_q = None
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if not text: continue
+        is_bold_para = any(run.bold for run in para.runs)
+        is_question_header = (is_bold_para or text.lower().startswith("câu") or (text and text[0].isdigit() and "." in text[:5]))
+        
+        if is_question_header:
+            current_q = {"question": text, "options": [], "correct": None}
+            data.append(current_q)
+        elif current_q is not None:
+            is_correct = False
+            for run in para.runs:
+                if (run.font.color and run.font.color.rgb == RGBColor(255, 0, 0)) or \
+                   (run.font.highlight_color == WD_COLOR_INDEX.YELLOW) or \
+                   ("*" in run.text and run.font.color and run.font.color.rgb == RGBColor(255, 0, 0)):
+                    is_correct = True
+            clean_text = text.replace("*", "").strip()
+            if clean_text and "phần bổ sung" not in clean_text.lower():
+                if clean_text not in current_q["options"]:
+                    current_q["options"].append(clean_text)
+                    if is_correct: current_q["correct"] = clean_text
+    return [q for q in data if len(q['options']) >= 2]
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.header("🔑 CẤU HÌNH")
-    user_key = st.text_input("Dán API Key của bạn:", value="AIzaSyCUkNGMJAuz4oZHyAMccN6W8zN4B6U8hWk", type="password")
-    file = st.file_uploader("Tải file Lập trình mạng.docx", type=["docx"])
-    if file and st.button("🚀 BẮT ĐẦU", use_container_width=True):
-        data = process_network_docx(file)
-        if data:
-            st.session_state.data_thi = data
-            st.session_state.user_answers = {}
-            st.session_state.current_idx = 0
-            st.session_state.ex_cache = {}
-            st.rerun()
+    st.header("🔑 CẤU HÌNH AI")
+    user_key = st.text_input("Nhập Gemini API Key:", value="AIzaSyCUkNGMJAuz4oZHyAMccN6W8zN4B6U8hWk", type="password")
+    
+    st.header("⚙️ CÀI ĐẶT")
+    uploaded_file = st.file_uploader("Tải đề (Word)", type=["docx"])
+    t1 = st.checkbox("Đảo câu hỏi")
+    t2 = st.checkbox("Đảo đáp án")
+    
+    if uploaded_file and st.button("🚀 BẮT ĐẦU", use_container_width=True, type="primary"):
+        st.session_state.user_answers = {}
+        st.session_state.current_idx = 0
+        st.session_state.ex_cache = {}
+        st.session_state.data_thi = read_docx(uploaded_file)
+        if t1: random.shuffle(st.session_state.data_thi)
+        if t2: 
+            for it in st.session_state.data_thi: random.shuffle(it['options'])
+        st.rerun()
+
+    if st.session_state.data_thi:
+        st.markdown("---")
+        if st.button("🎯 Làm lại câu chưa đúng", use_container_width=True):
+            sai_hoac_chua = [i for i in range(len(st.session_state.data_thi)) if st.session_state.user_answers.get(i) != st.session_state.data_thi[i]['correct']]
+            if sai_hoac_chua:
+                st.session_state.data_thi = [st.session_state.data_thi[i] for i in sai_hoac_chua]
+                st.session_state.user_answers = {}; st.session_state.current_idx = 0; st.session_state.ex_cache = {}; st.rerun()
+        if st.button("🔄 Đổi đề khác", use_container_width=True):
+            st.session_state.data_thi = None; st.rerun()
 
 # --- GIAO DIỆN CHÍNH ---
 if st.session_state.data_thi:
     data = st.session_state.data_thi
     idx = st.session_state.current_idx
-    item = data[idx]
+    tong = len(data)
+    da_lam = len(st.session_state.user_answers)
+    dung = sum(1 for i, ans in st.session_state.user_answers.items() if ans == data[i]['correct'])
     
     col_l, col_m, col_r = st.columns([1, 2.5, 1.2])
+    
+    with col_l:
+        with st.container(border=True):
+            st.write("### 📊 Thống kê")
+            st.write(f"📝 Đã làm: **{da_lam}/{tong}**")
+            st.write(f"✅ Đúng: **{dung}** | ❌ Sai: **{da_lam - dung}**")
+            st.progress(da_lam / tong if tong > 0 else 0)
+            st.metric("🎯 Điểm", f"{(dung/tong)*10:.2f}" if tong > 0 else "0.00")
+
     with col_m:
-        st.markdown(f'<div class="question-box"><div class="question-text">Câu {idx + 1}: {item["question"]}</div></div>', unsafe_allow_html=True)
+        item = data[idx]
+        st.markdown(f'<div class="question-box"><div class="question-text">Câu {idx + 1}:</div><div>{item["question"]}</div></div>', unsafe_allow_html=True)
         
-        ans = idx in st.session_state.user_answers
-        choice = st.radio("Chọn đáp án:", item['options'], key=f"q_{idx}", index=None if not ans else item['options'].index(st.session_state.user_answers[idx]), disabled=ans)
+        answered = idx in st.session_state.user_answers
+        choice = st.radio("Đáp án:", item['options'], key=f"r_{idx}", 
+                          index=item['options'].index(st.session_state.user_answers[idx]) if answered else None,
+                          disabled=answered, label_visibility="collapsed")
         
-        if choice and not ans:
+        if choice and not answered:
             st.session_state.user_answers[idx] = choice
+            st.session_state.next_trigger = True
             st.rerun()
             
-        if ans:
-            if st.session_state.user_answers[idx] == item['correct']:
-                st.success("Đúng rồi! ✅")
-            else:
-                st.error(f"Sai rồi! Đáp án đúng: {item['correct']}")
-                if user_key and st.button("💡 Giải thích bằng AI"):
-                    with st.spinner("AI Gemini 2.0 đang phân tích..."):
-                        st.session_state.ex_cache[idx] = get_ai_explanation(user_key, item['question'], item['correct'], st.session_state.user_answers[idx])
+        if answered:
+            if st.session_state.user_answers[idx] == item['correct']: 
+                st.success("ĐÚNG! ✅")
+            else: 
+                st.error(f"SAI! ❌ Đáp án đúng: **{item['correct']}**")
+                # Nút giải thích bằng AI
+                if user_key:
+                    if st.button("💡 Giải thích bằng AI"):
+                        with st.spinner("AI đang phân tích..."):
+                            st.session_state.ex_cache[idx] = get_ai_explanation(user_key, item['question'], item['correct'], st.session_state.user_answers[idx])
+                
                 if idx in st.session_state.ex_cache:
                     st.markdown(f'<div class="ai-explanation">{st.session_state.ex_cache[idx]}</div>', unsafe_allow_html=True)
-
+        
         st.write("---")
-        b1, b2 = st.columns(2)
-        if b1.button("⬅ Trước"): st.session_state.current_idx = max(0, idx-1); st.rerun()
-        if b2.button("Sau ➡"): st.session_state.current_idx = min(len(data)-1, idx+1); st.rerun()
+        c1, c2 = st.columns(2)
+        if c1.button("⬅ Câu trước", use_container_width=True):
+            st.session_state.current_idx = max(0, idx - 1); st.rerun()
+        if c2.button("Câu sau ➡", use_container_width=True):
+            st.session_state.current_idx = min(tong-1, idx + 1); st.rerun()
 
     with col_r:
         st.write("### 📑 Mục lục")
-        for i in range(0, len(data), 4):
-            cols = st.columns(4)
-            for j in range(4):
+        grid = 4
+        for i in range(0, tong, grid):
+            cols = st.columns(grid)
+            for j in range(grid):
                 curr = i + j
-                if curr < len(data):
+                if curr < tong:
                     lbl = f"{curr+1}"
                     if curr in st.session_state.user_answers:
-                        lbl += "✅" if st.session_state.user_answers[curr] == data[curr]['correct'] else "❌"
-                    if cols[j].button(lbl, key=f"n_{curr}"):
+                        lbl += " ✅" if st.session_state.user_answers[curr] == data[curr]['correct'] else " ❌"
+                    if cols[j].button(lbl, key=f"m_{curr}", use_container_width=True):
                         st.session_state.current_idx = curr; st.rerun()
+
+    if st.session_state.next_trigger:
+        time.sleep(1.0)
+        st.session_state.next_trigger = False
+        if st.session_state.current_idx < tong - 1:
+            st.session_state.current_idx += 1; st.rerun()
 else:
-    st.info("👈 Hãy tải file và kiểm tra Key.")
+    st.info("👈 Mở thanh bên trái để nạp file Word (.docx) và bắt đầu.")
