@@ -114,4 +114,19 @@ if st.session_state.data_thi:
         st.write("---")
         b1, b2 = st.columns(2)
         if b1.button("⬅ Trước"): st.session_state.current_idx = max(0, idx-1); st.rerun()
-        if b2.button("Sau ➡"): st.session_state.current_idx = min(
+        if b2.button("Sau ➡"): st.session_state.current_idx = min(len(data)-1, idx+1); st.rerun()
+
+    with col_r:
+        st.write("### 📑 Mục lục")
+        for i in range(0, len(data), 4):
+            cols = st.columns(4)
+            for j in range(4):
+                curr = i + j
+                if curr < len(data):
+                    lbl = f"{curr+1}"
+                    if curr in st.session_state.user_answers:
+                        lbl += "✅" if st.session_state.user_answers[curr] == data[curr]['correct'] else "❌"
+                    if cols[j].button(lbl, key=f"n_{curr}"):
+                        st.session_state.current_idx = curr; st.rerun()
+else:
+    st.info("👈 Hãy tải file và kiểm tra Key.")
