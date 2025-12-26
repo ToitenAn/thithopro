@@ -8,27 +8,21 @@ import time
 import io
 import PyPDF2
 
-# --- CẤU HÌNH BẢO MẬT KEY ---
+# --- CẤU HÌNH API KEY ---
 HIDDEN_API_KEY = "AIzaSyCUkNGMJAuz4oZHyAMccN6W8zN4B6U8hWk" 
 
-st.set_page_config(page_title="ThiTho Pro", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="ThiTho Pro V3", layout="wide")
 
+# CSS tối ưu hiển thị câu hỏi và code
 st.markdown("""
     <style>
-    .main .block-container { max-width: 95% !important; padding-top: 2rem !important; }
-    .question-box { background: #ffffff; padding: 25px; border-radius: 12px; border: 1px solid #dee2e6; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-    .question-text { font-size: 20px !important; font-weight: 700; color: #1f1f1f; margin-bottom: 15px; white-space: pre-wrap; }
-    .ai-explanation { background-color: #f8faff; border-left: 6px solid #007bff; padding: 20px; margin-top: 15px; border-radius: 8px; font-size: 17px; line-height: 1.7; }
-    .warning-box { background-color: #fff3cd; border-left: 6px solid #ffc107; padding: 15px; border-radius: 8px; color: #856404; font-weight: bold; }
+    .question-box { background: #ffffff; padding: 25px; border-radius: 12px; border: 1px solid #dee2e6; margin-bottom: 20px; }
+    .question-text { font-size: 19px !important; font-weight: 600; color: #1f1f1f; white-space: pre-wrap; font-family: 'Source Code Pro', monospace; }
+    .ai-explanation { background-color: #f0f7ff; border-left: 6px solid #007bff; padding: 20px; border-radius: 8px; font-size: 16px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- QUẢN LÝ TRẠNG THÁI ---
-for key in ['data_thi', 'user_answers', 'current_idx', 'next_trigger', 'ex_cache']:
-    if key not in st.session_state:
-        st.session_state[key] = None if key == 'data_thi' else ({} if key in ['user_answers', 'ex_cache'] else (0 if key == 'current_idx' else False))
-
-# --- HÀM ĐỌC FILE WORD (ĐÃ FIX LỖI MẤT NỘI DUNG CODE) ---
+# --- HÀM ĐỌC WORD TỐI ƯU CHO CODE ---
 def read_docx(file_bytes):
     try:
         doc = Document(io.BytesIO(file_bytes))
@@ -39,138 +33,119 @@ def read_docx(file_bytes):
             text = para.text.strip()
             if not text: continue
             
-            # Kiểm tra định dạng dòng (In đậm hoặc bắt đầu bằng "Câu")
-            is_bold = any(run.bold for run in para.runs)
-            is_header = text.lower().startswith("câu") or (text and text[0].isdigit() and "." in text[:5])
+            # Kiểm tra xem dòng này có phải là đáp án đúng không (Màu đỏ hoặc Highlight vàng)
+            is_answer_style = False
+            for run in para.runs:
+                if (run.font.color and run.font.color.rgb == RGBColor(255, 0, 0)) or \
+                   (run.font.highlight_color == WD_COLOR_INDEX.YELLOW):
+                    is_answer_style = True
+                    break
             
-            # Nếu là tiêu đề câu hỏi mới
-            if is_header:
+            # Nhận diện dòng bắt đầu câu hỏi (Ví dụ: "Câu 33:")
+            is_new_q = text.lower().startswith("câu") and any(char.isdigit() for char in text[:10])
+
+            if is_new_q:
                 current_q = {"question": text, "options": [], "correct": None}
                 data.append(current_q)
-            
             elif current_q is not None:
-                # Kiểm tra xem dòng này có phải đáp án đúng không (Chữ đỏ hoặc bôi vàng)
-                is_correct_style = False
-                for run in para.runs:
-                    if (run.font.color and run.font.color.rgb == RGBColor(255, 0, 0)) or \
-                       (run.font.highlight_color == WD_COLOR_INDEX.YELLOW):
-                        is_correct_style = True
+                # Nếu là dòng đáp án (in đậm hoặc có màu đặc biệt)
+                # Lưu ý: Nếu đáp án của bạn KHÔNG in đậm, hãy bỏ điều kiện 'any(run.bold...)'
+                is_bold = any(run.bold for run in para.runs)
                 
-                # LOGIC QUAN TRỌNG: 
-                # Nếu dòng có chữ đỏ/vàng hoặc in đậm (mà không phải header) -> Coi là đáp án
-                # Nếu dòng bình thường (như đoạn code Java) -> Gộp vào nội dung câu hỏi
-                if is_correct_style or (is_bold and not is_header):
-                    clean_text = text.replace("*", "").strip()
-                    if clean_text not in current_q["options"]:
-                        current_q["options"].append(clean_text)
-                        if is_correct_style: current_q["correct"] = clean_text
+                if is_answer_style or (is_bold and len(text) < 100):
+                    clean_opt = text.replace("*", "").strip()
+                    if clean_opt not in current_q["options"]:
+                        current_q["options"].append(clean_opt)
+                        if is_answer_style:
+                            current_q["correct"] = clean_opt
                 else:
-                    # Gộp thêm vào nội dung câu hỏi (cho các đoạn code nhiều dòng)
+                    # Nếu không phải đáp án -> Nó là nội dung code hoặc văn bản của câu hỏi
                     current_q["question"] += "\n" + text
-
-        return [q for q in data if len(q['options']) >= 2]
+        
+        # Lọc bỏ các câu không có đáp án
+        return [q for q in data if q['options']]
     except Exception as e:
-        st.error(f"Lỗi đọc Word: {e}"); return None
+        st.error(f"Lỗi: {e}"); return None
 
-# --- CÁC HÀM AI & PDF GIỮ NGUYÊN ---
-def read_pdf(file_bytes):
-    try:
-        reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
-        full_text = ""
-        for page in reader.pages: full_text += page.extract_text() + "\n"
-        lines = full_text.split('\n')
-        data, current_q = [], None
-        for line in lines:
-            line = line.strip()
-            if not line: continue
-            if line.lower().startswith("câu") or (line and line[0].isdigit() and "." in line[:5]):
-                current_q = {"question": line, "options": [], "correct": None}
-                data.append(current_q)
-            elif current_q is not None and len(current_q["options"]) < 4:
-                is_correct = "*" in line
-                clean_opt = line.replace("*", "").strip()
-                current_q["options"].append(clean_opt)
-                if is_correct: current_q["correct"] = clean_opt
-        return [q for q in data if len(q['options']) >= 2]
-    except Exception as e: st.error(f"Lỗi đọc PDF: {e}"); return None
-
+# --- CÁC HÀM PHỤ TRỢ ---
 def get_ai_explanation(q, options, corr_text):
     try:
         genai.configure(api_key=HIDDEN_API_KEY)
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         labels = ["A", "B", "C", "D"]
-        corr_label = labels[options.index(corr_text)] if corr_text in options else "?"
-        prompt = f"Câu hỏi: {q}\nĐáp án: {corr_text}\nGiải thích tại sao chọn {corr_label} và tại sao các câu khác sai. Nếu đáp án tài liệu sai hãy phản biện."
+        c_label = labels[options.index(corr_text)] if corr_text in options else "?"
+        prompt = f"Phân tích câu hỏi lập trình/mạng sau:\n{q}\nĐáp án đúng là: {corr_text}\nTại sao chọn {c_label} và tại sao các câu khác sai? Nếu đáp án đề cho sai kiến thức hãy cảnh báo."
         return model.generate_content(prompt).text
-    except: return "❌ AI đang bận."
+    except: return "AI đang bận, hãy thử lại sau."
 
-# --- GIAO DIỆN (GIỮ NGUYÊN CẤU TRÚC 3 CỘT CỦA BẠN) ---
+# --- GIAO DIỆN STREAMLIT ---
+if 'data_thi' not in st.session_state:
+    st.session_state.update({'data_thi': None, 'user_answers': {}, 'current_idx': 0, 'ex_cache': {}})
+
 with st.sidebar:
-    st.header("⚙️ CÀI ĐẶT")
-    file = st.file_uploader("Tải đề (Word/PDF)", type=["docx", "pdf"])
-    t1, t2 = st.checkbox("Đảo câu hỏi"), st.checkbox("Đảo đáp án")
-    if file and st.button("🚀 BẮT ĐẦU", use_container_width=True, type="primary"):
-        fb = file.read()
-        res = read_pdf(fb) if file.name.endswith(".pdf") else read_docx(fb)
+    st.header("⚙️ QUẢN LÝ ĐỀ")
+    file = st.file_uploader("Tải file Word (.docx)", type=["docx"])
+    if file and st.button("🚀 NẠP ĐỀ NGAY"):
+        res = read_docx(file.read())
         if res:
-            if t1: random.shuffle(res)
-            if t2: [random.shuffle(it['options']) for it in res]
-            st.session_state.data_thi, st.session_state.user_answers, st.session_state.current_idx, st.session_state.ex_cache = res, {}, 0, {}
+            st.session_state.update({'data_thi': res, 'user_answers': {}, 'current_idx': 0, 'ex_cache': {}})
+            st.success(f"Đã nạp {len(res)} câu hỏi!")
             st.rerun()
 
 if st.session_state.data_thi:
-    data, idx = st.session_state.data_thi, st.session_state.current_idx
-    item, labels = data[idx], ["A", "B", "C", "D"]
+    data = st.session_state.data_thi
+    idx = st.session_state.current_idx
+    item = data[idx]
+    
     col_l, col_m, col_r = st.columns([1, 2.5, 1.2])
     
-    with col_l:
-        with st.container(border=True):
-            st.write("### 📊 Thống kê")
-            dung = sum(1 for i, ans in st.session_state.user_answers.items() if ans == data[i]['correct'])
-            st.write(f"📝 Câu: **{idx+1}/{len(data)}**")
-            st.progress((idx + 1) / len(data))
-            st.metric("✅ Đúng", dung)
-
     with col_m:
+        # Hiển thị câu hỏi (bao gồm cả code Java)
         st.markdown(f'<div class="question-box"><div class="question-text">{item["question"]}</div></div>', unsafe_allow_html=True)
-        ans_done = idx in st.session_state.user_answers
-        opts_display = [f"{labels[i]}. {opt}" for i, opt in enumerate(item['options'])]
         
-        choice_lbl = st.radio("Đáp án:", opts_display, key=f"r_{idx}", index=item['options'].index(st.session_state.user_answers[idx]) if ans_done else None, disabled=ans_done, label_visibility="collapsed")
+        answered = idx in st.session_state.user_answers
+        labels = ["A", "B", "C", "D"]
+        opts = [f"{labels[i]}. {opt}" for i, opt in enumerate(item['options'])]
         
-        if choice_lbl and not ans_done:
-            st.session_state.user_answers[idx] = item['options'][opts_display.index(choice_lbl)]
-            st.session_state.next_trigger = True; st.rerun()
+        choice = st.radio("Chọn đáp án:", opts, key=f"q_{idx}", index=None if not answered else item['options'].index(st.session_state.user_answers[idx]), disabled=answered)
+        
+        if choice and not answered:
+            st.session_state.user_answers[idx] = item['options'][opts.index(choice)]
+            st.rerun()
             
-        if ans_done:
-            c_idx = item['options'].index(item['correct']) if item['correct'] in item['options'] else 0
-            if st.session_state.user_answers[idx] == item['correct']: st.success(f"Đúng! ✅")
-            else: st.error(f"Sai! Đáp án đúng: {labels[c_idx]}")
+        if answered:
+            correct_opt = item['correct']
+            is_right = st.session_state.user_answers[idx] == correct_opt
+            if is_right:
+                st.success("Chính xác! ✅")
+            else:
+                st.error(f"Sai rồi. Đáp án đúng là: {correct_opt}")
             
-            if st.button("🔍 Giải thích chuyên sâu"):
-                with st.spinner("AI đang phân tích..."):
-                    st.session_state.ex_cache[idx] = get_ai_explanation(item['question'], item['options'], item['correct'])
+            if st.button("💡 Giải thích & Phản biện"):
+                with st.spinner("Đang phân tích code..."):
+                    st.session_state.ex_cache[idx] = get_ai_explanation(item['question'], item['options'], correct_opt)
+            
             if idx in st.session_state.ex_cache:
-                st.markdown(f'<div class="ai-explanation">{st.session_state.ex_cache[idx]}</div>', unsafe_allow_html=True)
-        
+                st.markdown(f'<div class="ai-explanation"><b>🤖 Phân tích:</b><br>{st.session_state.ex_cache[idx]}</div>', unsafe_allow_html=True)
+
+        # Điều hướng
         st.write("---")
         c1, c2 = st.columns(2)
-        if c1.button("⬅ Trước"): st.session_state.current_idx = max(0, idx - 1); st.rerun()
-        if c2.button("Sau ➡"): st.session_state.current_idx = min(len(data)-1, idx + 1); st.rerun()
+        if c1.button("⬅ Câu trước") and idx > 0:
+            st.session_state.current_idx -= 1; st.rerun()
+        if c2.button("Câu tiếp theo ➡") and idx < len(data) - 1:
+            st.session_state.current_idx += 1; st.rerun()
 
     with col_r:
-        st.write("### 📑 Mục lục")
+        st.write("### 📑 Danh sách câu")
         for i in range(0, len(data), 4):
             cols = st.columns(4)
             for j in range(4):
-                curr = i + j
-                if curr < len(data):
-                    lbl = f"{curr+1}"
-                    if curr in st.session_state.user_answers: lbl += "✅" if st.session_state.user_answers[curr] == data[curr]['correct'] else "❌"
-                    if cols[j].button(lbl, key=f"m_{curr}"): st.session_state.current_idx = curr; st.rerun()
-
-    if st.session_state.next_trigger:
-        time.sleep(1.0); st.session_state.next_trigger = False
-        if st.session_state.current_idx < len(data) - 1: st.session_state.current_idx += 1; st.rerun()
+                if i+j < len(data):
+                    label = f"{i+j+1}"
+                    if i+j in st.session_state.user_answers:
+                        label += "✅" if st.session_state.user_answers[i+j] == data[i+j]['correct'] else "❌"
+                    if cols[j].button(label, key=f"btn_{i+j}"):
+                        st.session_state.current_idx = i+j; st.rerun()
 else:
-    st.info("👈 Nạp file Word/PDF để bắt đầu.")
+    st.info("Hãy tải file Word ở thanh bên trái để bắt đầu ôn tập.")
