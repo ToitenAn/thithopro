@@ -19,7 +19,6 @@ st.markdown("""
     .question-box { background: #ffffff; padding: 25px; border-radius: 12px; border: 1px solid #dee2e6; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
     .question-text { font-size: 20px !important; font-weight: 700; color: #1f1f1f; margin-bottom: 10px; }
     .ai-explanation { background-color: #f0f7ff; border-left: 5px solid #007bff; padding: 20px; margin-top: 15px; border-radius: 8px; color: #1a1a1a; font-size: 16px; line-height: 1.6; }
-    .ai-important { color: #007bff; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -56,30 +55,35 @@ def read_docx(file_bytes):
         st.error(f"Lỗi đọc file: {e}")
         return None
 
-# --- HÀM AI TRẢ LỜI TRỰC DIỆN ---
-def get_ai_explanation(q, corr, user_ans):
+# --- HÀM AI TRẢ LỜI THEO CẤU TRÚC A,B,C,D ---
+def get_ai_explanation(q, options, corr_text):
     try:
         genai.configure(api_key=HIDDEN_API_KEY)
-        # Tự động lấy danh sách model sống
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         available_models.sort(key=lambda x: ("flash" not in x.lower()))
 
-        # CẤU TRÚC PROMPT THEO YÊU CẦU
+        # Xác định nhãn A, B, C, D của đáp án đúng
+        labels = ["A", "B", "C", "D", "E", "F"]
+        corr_label = "Chưa xác định"
+        options_with_labels = ""
+        for i, opt in enumerate(options):
+            label = labels[i] if i < len(labels) else str(i)
+            options_with_labels += f"{label}. {opt}\n"
+            if opt == corr_text:
+                corr_label = label
+
         prompt = f"""
         Bạn là giảng viên chuyên ngành Mạng máy tính. 
-        Hãy trả lời câu hỏi trắc nghiệm sau theo đúng cấu trúc yêu cầu.
+        Hãy trả lời câu hỏi trắc nghiệm sau.
 
         CÂU HỎI: {q}
-        ĐÁP ÁN ĐÚNG: {corr}
+        CÁC LỰA CHỌN:
+        {options_with_labels}
 
-        YÊU CẦU CẤU TRÚC TRẢ LỜI:
-        "Bạn nên chọn đáp án **{corr}** vì [Giải thích lý do ngắn gọn, tập trung vào kiến thức chuyên môn, định nghĩa hoặc tiêu chí phân loại liên quan đến câu hỏi]."
+        YÊU CẦU CẤU TRÚC TRẢ LỜI DUY NHẤT:
+        "Bạn nên chọn đáp án {corr_label} vì [Giải thích lý do ngắn gọn, đi thẳng vào kiến thức mạng máy tính]."
 
-        Lưu ý: 
-        - Không chào hỏi.
-        - Không nhắc lại câu hỏi.
-        - Trả lời thẳng vào cấu trúc trên.
-        - Giải thích súc tích, dễ hiểu.
+        Lưu ý: Không chào hỏi, không nhắc lại câu hỏi.
         """
 
         for m_name in available_models:
@@ -89,7 +93,7 @@ def get_ai_explanation(q, corr, user_ans):
                 return response.text
             except:
                 continue
-        return "❌ AI hiện đang bận, vui lòng thử lại sau."
+        return "❌ AI hiện đang bận, vui lòng thử lại."
     except Exception as e:
         return f"❌ Lỗi: {str(e)}"
 
@@ -114,6 +118,7 @@ if st.session_state.data_thi:
     data = st.session_state.data_thi
     idx = st.session_state.current_idx
     item = data[idx]
+    labels = ["A", "B", "C", "D", "E", "F"]
     
     col_stats, col_main, col_nav = st.columns([1, 2.5, 1.2])
     
@@ -129,23 +134,32 @@ if st.session_state.data_thi:
         st.markdown(f'<div class="question-box"><div class="question-text">Câu {idx + 1}:</div>{item["question"]}</div>', unsafe_allow_html=True)
         ans_done = idx in st.session_state.user_answers
         
-        choice = st.radio("Chọn đáp án:", item['options'], key=f"q_{idx}", 
-                          index=None if not ans_done else item['options'].index(st.session_state.user_answers[idx]), 
-                          disabled=ans_done, label_visibility="collapsed")
+        # Hiển thị đáp án kèm nhãn A, B, C, D
+        display_options = [f"{labels[i]}. {opt}" for i, opt in enumerate(item['options'])]
         
-        if choice and not ans_done:
-            st.session_state.user_answers[idx] = choice
+        choice_display = st.radio("Chọn đáp án:", display_options, key=f"q_{idx}", 
+                                  index=None if not ans_done else [f"{labels[i]}. {opt}" for i, opt in enumerate(item['options'])].index(next(f"{labels[i]}. {opt}" for i, opt in enumerate(item['options']) if opt == st.session_state.user_answers[idx])), 
+                                  disabled=ans_done, label_visibility="collapsed")
+        
+        if choice_display and not ans_done:
+            # Lấy lại text gốc (không kèm nhãn A.) để so sánh
+            selected_text = item['options'][display_options.index(choice_display)]
+            st.session_state.user_answers[idx] = selected_text
             st.rerun()
             
         if ans_done:
+            # Tìm nhãn của đáp án đúng
+            corr_idx = item['options'].index(item['correct'])
+            corr_label = labels[corr_idx]
+            
             if st.session_state.user_answers[idx] == item['correct']: 
-                st.success("Chính xác! ✅")
+                st.success(f"Chính xác! Đáp án đúng là {corr_label} ✅")
             else:
-                st.error(f"Sai rồi! Đáp án đúng: **{item['correct']}**")
+                st.error(f"Sai rồi! Đáp án đúng là {corr_label}: **{item['correct']}**")
                 
             if st.button("💡 Tại sao đáp án này đúng?"):
                 with st.spinner("AI đang phân tích..."):
-                    st.session_state.ex_cache[idx] = get_ai_explanation(item['question'], item['correct'], st.session_state.user_answers[idx])
+                    st.session_state.ex_cache[idx] = get_ai_explanation(item['question'], item['options'], item['correct'])
             
             if idx in st.session_state.ex_cache:
                 st.markdown(f'<div class="ai-explanation">{st.session_state.ex_cache[idx]}</div>', unsafe_allow_html=True)
@@ -154,7 +168,7 @@ if st.session_state.data_thi:
         b1, b2 = st.columns(2)
         if b1.button("⬅ Câu trước", use_container_width=True): 
             st.session_state.current_idx = max(0, idx - 1); st.rerun()
-        if b2.button("Câu sau ➡", use_container_width=True): 
+        if b2.button("Sau ➡", use_container_width=True): 
             st.session_state.current_idx = min(len(data) - 1, idx + 1); st.rerun()
 
     with col_nav:
