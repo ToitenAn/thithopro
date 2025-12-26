@@ -9,7 +9,7 @@ import os
 st.set_page_config(page_title="ThiTho Pro - Lập Trình Mạng", layout="wide")
 
 # Sử dụng API Key bạn đã cung cấp
-API_KEY = "AIzaSyDltPif--RgiBgVARciWVTrmLCHWUr7ZW8"
+API_KEY = "AIzaSyDItPif--RgiBgVARciWVTrmLCHWUr7ZW8"
 genai.configure(api_key=API_KEY)
 
 st.markdown("""
@@ -179,3 +179,4 @@ if st.session_state.data_thi:
                         st.session_state.current_idx = curr; st.rerun()
 else:
     st.info("👈 Vui lòng tải file 'Lập trình mạng.docx' lên để bắt đầu học tập.")
+
