@@ -7,20 +7,19 @@ import random
 import time
 import io
 
-# --- CẤU HÌNH BẢO MẬT KEY (ẨN TRONG CODE) ---
+# --- CẤU HÌNH BẢO MẬT KEY ---
 HIDDEN_API_KEY = "AIzaSyCUkNGMJAuz4oZHyAMccN6W8zN4B6U8hWk" 
 
-# --- CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(page_title="ThiTho Pro - Lập Trình Mạng", layout="wide")
 
+# --- CSS TỐI ƯU GIAO DIỆN ---
 st.markdown("""
     <style>
     .main .block-container { max-width: 95% !important; padding-top: 2rem !important; }
     .question-box { background: #ffffff; padding: 25px; border-radius: 12px; border: 1px solid #dee2e6; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
     .question-text { font-size: 20px !important; font-weight: 700; color: #1f1f1f; margin-bottom: 10px; }
-    .ai-explanation { background-color: #f0f7ff; border-left: 5px solid #007bff; padding: 15px; margin-top: 15px; border-radius: 8px; color: #1a1a1a; font-size: 16px; }
-    div[data-testid="stHorizontalBlock"] button:has(span:contains("✅")) { background-color: #28a745 !important; color: white !important; }
-    div[data-testid="stHorizontalBlock"] button:has(span:contains("❌")) { background-color: #ff4b4b !important; color: white !important; }
+    .ai-explanation { background-color: #f0f7ff; border-left: 5px solid #007bff; padding: 20px; margin-top: 15px; border-radius: 8px; color: #1a1a1a; font-size: 16px; line-height: 1.6; }
+    .ai-header { color: #007bff; font-weight: bold; font-size: 18px; margin-bottom: 10px; display: block; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -57,30 +56,40 @@ def read_docx(file_bytes):
         st.error(f"Lỗi đọc file: {e}")
         return None
 
-# --- HÀM AI (SỬ DỤNG CÁC MODEL MỚI NHẤT CỦA BẠN) ---
+# --- HÀM AI TẬP TRUNG VÀO ĐÁP ÁN ---
 def get_ai_explanation(q, corr, user_ans):
-    # Danh sách model chuẩn lấy từ kết quả scan của bạn
-    models_to_try = [
-        "models/gemini-3-flash-preview",
-        "models/gemini-2.5-flash",
-        "models/gemini-2.0-flash"
-    ]
-    genai.configure(api_key=HIDDEN_API_KEY)
-    
-    last_err = ""
-    for m_name in models_to_try:
-        try:
-            model = genai.GenerativeModel(m_name)
-            prompt = f"Bạn là giảng viên Lập trình mạng. Giải thích ngắn gọn tại sao '{corr}' đúng cho câu hỏi: {q}. Người học chọn sai: {user_ans}. Dùng tiếng Việt."
-            response = model.generate_content(prompt)
-            return f"*(Sử dụng: {m_name.split('/')[-1]})*\n\n{response.text}"
-        except Exception as e:
-            last_err = str(e)
-            if "404" in last_err or "429" in last_err:
-                continue # Thử model tiếp theo
-            return f"❌ Lỗi AI: {last_err}"
-            
-    return f"❌ Cạn kiệt model hoặc lỗi hệ thống. Vui lòng thử lại sau 10 giây.\nChi tiết: {last_err}"
+    try:
+        genai.configure(api_key=HIDDEN_API_KEY)
+        # Tự động lấy các model khả dụng trong tài khoản của bạn
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        available_models.sort(key=lambda x: ("flash" not in x.lower())) # Ưu tiên các dòng Flash
+
+        # PROMPT TẬP TRUNG CAO ĐỘ
+        prompt = f"""
+        Bạn là chuyên gia về Mạng máy tính. Hãy giải thích câu hỏi trắc nghiệm sau một cách cực kỳ ngắn gọn, đi thẳng vào vấn đề.
+
+        CÂU HỎI: {q}
+        ĐÁP ÁN ĐÚNG: {corr}
+        NGƯỜI HỌC CHỌN: {user_ans}
+
+        Yêu cầu trả lời theo cấu trúc chính xác như sau:
+        1. Khẳng định đáp án đúng.
+        2. Tại sao đáp án đúng: Giải thích ngắn gọn tiêu chí hoặc kiến thức chuyên môn (ví dụ: Dưới góc độ địa lý thì mạng chia thành LAN, WAN, GAN...).
+        3. Tại sao các đáp án khác sai (nếu cần thiết để làm rõ).
+        
+        Trả lời bằng tiếng Việt, súc tích, không chào hỏi vòng vo.
+        """
+
+        for m_name in available_models:
+            try:
+                model = genai.GenerativeModel(m_name)
+                response = model.generate_content(prompt)
+                return f"<span class='ai-header'>🤖 AI Giải thích ({m_name.split('/')[-1]}):</span><br>{response.text}"
+            except:
+                continue
+        return "❌ Các model AI hiện đang quá tải. Thử lại sau giây lát."
+    except Exception as e:
+        return f"❌ Lỗi hệ thống AI: {str(e)}"
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -96,18 +105,6 @@ with st.sidebar:
             if dao_ap: 
                 for item in res: random.shuffle(item['options'])
             st.session_state.data_thi, st.session_state.user_answers, st.session_state.current_idx, st.session_state.ex_cache = res, {}, 0, {}
-            st.rerun()
-
-    if st.session_state.data_thi:
-        st.write("---")
-        if st.button("🎯 Làm lại câu sai", use_container_width=True):
-            data = st.session_state.data_thi
-            sai = [data[i] for i in range(len(data)) if st.session_state.user_answers.get(i) != data[i]['correct']]
-            if sai:
-                st.session_state.data_thi, st.session_state.user_answers, st.session_state.current_idx, st.session_state.ex_cache = sai, {}, 0, {}
-                st.rerun()
-        if st.button("🔄 Đổi đề mới", use_container_width=True):
-            st.session_state.data_thi = None
             st.rerun()
 
 # --- GIAO DIỆN CHÍNH ---
@@ -129,28 +126,31 @@ if st.session_state.data_thi:
     with c_main:
         st.markdown(f'<div class="question-box"><div class="question-text">Câu {idx + 1}:</div>{item["question"]}</div>', unsafe_allow_html=True)
         ans_done = idx in st.session_state.user_answers
-        choice = st.radio("Chọn:", item['options'], key=f"q_{idx}", 
+        
+        choice = st.radio("Chọn đáp án:", item['options'], key=f"q_{idx}", 
                           index=None if not ans_done else item['options'].index(st.session_state.user_answers[idx]), 
                           disabled=ans_done, label_visibility="collapsed")
         
         if choice and not ans_done:
             st.session_state.user_answers[idx] = choice
-            st.session_state.next_trigger = True
             st.rerun()
             
         if ans_done:
-            if st.session_state.user_answers[idx] == item['correct']: st.success("Chính xác! ✅")
+            if st.session_state.user_answers[idx] == item['correct']: 
+                st.success("Chính xác! ✅")
             else:
                 st.error(f"Sai rồi! Đáp án đúng: **{item['correct']}**")
-                if st.button("💡 Giải thích bằng AI"):
-                    with st.spinner("AI Gemini đang phân tích..."):
-                        st.session_state.ex_cache[idx] = get_ai_explanation(item['question'], item['correct'], st.session_state.user_answers[idx])
-                if idx in st.session_state.ex_cache:
-                    st.markdown(f'<div class="ai-explanation">{st.session_state.ex_cache[idx]}</div>', unsafe_allow_html=True)
+                
+            if st.button("💡 Giải thích bằng AI"):
+                with st.spinner("AI đang phân tích kiến thức chuyên môn..."):
+                    st.session_state.ex_cache[idx] = get_ai_explanation(item['question'], item['correct'], st.session_state.user_answers[idx])
+            
+            if idx in st.session_state.ex_cache:
+                st.markdown(f'<div class="ai-explanation">{st.session_state.ex_cache[idx]}</div>', unsafe_allow_html=True)
 
         st.write("---")
         b1, b2 = st.columns(2)
-        if b1.button("⬅ Câu trước", use_container_width=True): 
+        if b1.button("⬅ Trước", use_container_width=True): 
             st.session_state.current_idx = max(0, idx - 1); st.rerun()
         if b2.button("Sau ➡", use_container_width=True): 
             st.session_state.current_idx = min(len(data) - 1, idx + 1); st.rerun()
@@ -167,11 +167,5 @@ if st.session_state.data_thi:
                         lbl += "✅" if st.session_state.user_answers[curr] == data[curr]['correct'] else "❌"
                     if cols[j].button(lbl, key=f"n_{curr}", use_container_width=True):
                         st.session_state.current_idx = curr; st.rerun()
-
-    if st.session_state.next_trigger:
-        time.sleep(1.2)
-        st.session_state.next_trigger = False
-        if st.session_state.current_idx < len(data) - 1:
-            st.session_state.current_idx += 1; st.rerun()
 else:
     st.info("👈 Hãy tải file Word (.docx) để bắt đầu.")
